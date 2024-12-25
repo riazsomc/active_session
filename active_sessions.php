@@ -11,6 +11,7 @@ class active_sessions extends rcube_plugin
         $this->load_config();
         $this->add_texts('localization/');
 
+        $this->check_db_schema();
         
         // =====================================
         // Hook into session_auth
@@ -253,4 +254,43 @@ class active_sessions extends rcube_plugin
         }
         return 'Unknown';
     }
+
+    private function check_db_schema()
+    {
+        $db = $this->rc->get_dbh();
+
+        // Check if 'user_agent' column exists
+        // Note: MySQL/MariaDB example. For other DBs, adapt accordingly.
+        $sql = "SHOW COLUMNS FROM `session` LIKE 'user_agent'";
+        $col_user = $db->query($sql)->fetch();
+
+        // Check if 'location' column exists
+        $sql = "SHOW COLUMNS FROM `session` LIKE 'location'";
+        $col_loc = $db->query($sql)->fetch();
+
+        // If either column is missing, run the ALTER TABLE
+        if (!$col_user || !$col_loc) {
+            $alter_sql = "ALTER TABLE `session` ";
+            $clauses   = [];
+
+            if (!$col_user) {
+                $clauses[] = "ADD COLUMN `user_agent` TEXT";
+            }
+            if (!$col_loc) {
+                $clauses[] = "ADD COLUMN `location` VARCHAR(255)";
+            }
+
+            // Build final ALTER statement
+            $alter_sql .= implode(", ", $clauses);
+
+            try {
+                $db->query($alter_sql);
+                rcube::write_log('installer', "Added missing columns to 'session' table: " . implode(', ', $clauses));
+            }
+            catch (Exception $e) {
+                rcube::write_log('installer', "Failed to alter 'session' table: " . $e->getMessage());
+            }
+        }
+    }
+
 }
