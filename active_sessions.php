@@ -116,6 +116,15 @@ class active_sessions extends rcube_plugin
      */
     function show_sessions()
     {
+        $client_ua = rcube_utils::get_input_value('client_ua', rcube_utils::INPUT_POST);
+    
+        if (!empty($client_ua)) {
+            // Maybe store it or do nothing,
+            // but finalize the response as a simple JSON or command
+            $this->rc->output->command('plugin.capture_ua_done', 'OK');
+            $this->rc->output->send();
+            return;
+        }
         $sessions = $this->get_sessions();
     
         // Pass sessions to JavaScript (foot ensures it’s included at the bottom)
@@ -205,7 +214,7 @@ class active_sessions extends rcube_plugin
         $db = $this->rc->get_dbh();
         $query = "SELECT sess_id, ip, changed, vars, user_agent
                   FROM session
-                  WHERE vars IS NOT NULL AND vars != ''";
+                  WHERE user_agent IS NOT NULL AND user_agent != ''";
         $sessions = $db->query($query)->fetchAll(PDO::FETCH_ASSOC);
     
         foreach ($sessions as &$session) {
