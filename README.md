@@ -1,6 +1,6 @@
 # Roundcube Active Sessions Plugin
 
-**Author**: Your Name (or Company)  
+**Author**: Dr. B. M. Riazul Islam  
 **Version**: 1.0.0  
 **Compatible With**: Roundcube 1.5+ (tested), likely works with other versions if configured properly
 
