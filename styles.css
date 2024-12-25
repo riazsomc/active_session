@@ -1,0 +1,40 @@
+#active-sessions {
+    margin: 20px;
+}
+
+#active-sessions h2 {
+    margin-bottom: 15px;
+}
+
+#active-sessions table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 20px;
+}
+
+#active-sessions th, #active-sessions td {
+    border: 1px solid #ddd;
+    padding: 10px;
+    text-align: left;
+}
+
+#active-sessions th {
+    background-color: #f4f4f4;
+}
+
+#active-sessions tbody tr:nth-child(even) {
+    background-color: #f9f9f9;
+}
+
+.button {
+    background-color: #007bff;
+    color: #fff;
+    border: none;
+    padding: 5px 10px;
+    cursor: pointer;
+    border-radius: 3px;
+}
+
+.button:hover {
+    background-color: #0056b3;
+}
