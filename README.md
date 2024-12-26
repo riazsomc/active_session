@@ -32,7 +32,7 @@ This is especially useful for users who want to monitor where and how their acco
 1. **Download or clone** this plugin into your Roundcube `plugins/active_sessions` directory:
    ```bash
    cd /path/to/roundcubemail/plugins
-   git clone https://github.com/your-repo/active_sessions.git
+   git clone https://github.com/riazsomc/active_sessions.git
    ```
    (Or manually place the files in a folder named `active_sessions`.)
 
