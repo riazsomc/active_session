@@ -87,7 +87,7 @@ The plugin integrates with Dovecot’s session management via `doveadm who` to f
 
 ### Terminating Dovecot Sessions
 - **Single Session Termination**: The plugin uses `doveadm kick username ip` to terminate individual IMAP sessions.
-- **Force Logout All Dovecot Sessions**: Combines `doveadm who` and `doveadm kick` to log out all IMAP sessions for the user.
+- **Force Logout All Devices**: Combines `doveadm who` and `doveadm kick` to log out all IMAP sessions for the user as well as all browser sessions.
 
 ### Compatibility Notes
 - Ensure Dovecot is installed and properly configured on your mail server.
