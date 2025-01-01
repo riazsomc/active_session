@@ -26,13 +26,14 @@ class active_sessions extends rcube_plugin
             $this->register_action('plugin.active_sessions', [$this, 'show_sessions']);
             $this->register_action('plugin.terminate_session', [$this, 'terminate_session']);
             $this->register_action('plugin.terminate_all_sessions', [$this, 'terminate_all_sessions']);
+            $this->register_action('plugin.terminate_dovecot_session', [$this, 'terminate_dovecot_session']);
         }
 
     }
 
-        /**
-     * This function is triggered when a user logs in successfully
-     */
+    /**
+        * This function is triggered when a user logs in successfully
+    */
     private function store_user_agent_once()
     {
         // Roundcube is using PHP sessions. session_id() gives the same ID as `sess_id` in the DB.
@@ -94,8 +95,6 @@ class active_sessions extends rcube_plugin
         }
     }
     
-
-
     /**
      * Add the plugin to the settings menu
      */
@@ -116,40 +115,25 @@ class active_sessions extends rcube_plugin
      */
     function show_sessions()
     {
-        $client_ua = rcube_utils::get_input_value('client_ua', rcube_utils::INPUT_POST);
-    
-        if (!empty($client_ua)) {
-            // Maybe store it or do nothing,
-            // but finalize the response as a simple JSON or command
-            $this->rc->output->command('plugin.capture_ua_done', 'OK');
-            $this->rc->output->send();
-            return;
-        }
         $sessions = $this->get_sessions();
-    
-        // Pass sessions to JavaScript (foot ensures it’s included at the bottom)
+        
+        // Debug output
+        error_log("Sessions sent to frontend: " . json_encode($sessions));
+        
         $this->rc->output->add_script('window.active_sessions = ' . json_encode($sessions), 'foot');
-    
-        // Register the template
         $this->register_handler('plugin.body', [$this, 'render_sessions']);
         $this->rc->output->set_pagetitle($this->gettext('active_sessions'));
-    
-        // Include scripts/styles AFTER setting window.active_sessions
         $this->include_stylesheet('styles.css');
-        $this->include_script('ua-parser.pack.min.js', 'foot');  // Make sure UA Parser is loaded first
-        $this->include_script('active_sessions.js', 'foot');     // Then your main script
-    
-        // Send
+        $this->include_script('ua-parser.pack.min.js', 'foot');
+        $this->include_script('active_sessions.js', 'foot');
         $this->rc->output->send('plugin');
     }
-    
 
     /**
      * Render the HTML for sessions
      */
     function render_sessions($attrib)
     {
-        // You can return the HTML directly
         return '
             <div id="active-sessions">
                 <h2>Active Sessions</h2>
@@ -158,13 +142,9 @@ class active_sessions extends rcube_plugin
                         <tr>
                             <th>IP Address</th>
                             <th>Location</th>
-                            <th>Language</th>
                             <th>Task</th>
-                            <th>Theme</th>
-                            <th>Dark Mode</th>
                             <th>Last Activity</th>
                             <th>User Agent</th>
-                            <th>OS</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
@@ -198,9 +178,39 @@ class active_sessions extends rcube_plugin
     function terminate_all_sessions()
     {
         $db = $this->rc->get_dbh();
-        $db->query("DELETE FROM session WHERE vars IS NOT NULL AND vars != ''");
+        $username = $this->rc->user->get_username();
 
-        error_log("All sessions terminated by user: " . $this->rc->user->get_username());
+        if (!$username) {
+            error_log("No logged-in username found for terminating all sessions.");
+            return;
+        }
+
+        // 1. Terminate all Roundcube sessions
+        $db->query("DELETE FROM session WHERE vars IS NOT NULL AND vars != ''");
+        error_log("All Roundcube sessions terminated for user: {$username}");
+
+        // 2. Fetch and terminate all Dovecot sessions
+        $dovecot_sessions = $this->get_dovecot_sessions();
+        if (empty($dovecot_sessions)) {
+            error_log("No Dovecot sessions found for user: {$username}");
+        }
+
+        $dovecot_sessions_terminated = 0;
+        foreach ($dovecot_sessions as $session) {
+            $ip = $session['ip'];
+            $command = "sudo doveadm kick {$username} {$ip}";
+            exec($command . " 2>&1", $output, $status);
+            if ($status === 0) {
+                error_log("Dovecot session terminated for user: {$username}, IP: {$ip}");
+                $dovecot_sessions_terminated++;
+            } else {
+                error_log("Failed to terminate Dovecot session for user: {$username}, IP: {$ip}. Output: " . implode("\n", $output));
+            }
+        }
+
+        if ($dovecot_sessions_terminated > 0) {
+            error_log("Total Dovecot sessions terminated for user: {$username}: {$dovecot_sessions_terminated}");
+        }
 
         // Trigger client refresh
         $this->rc->output->command('plugin.active_sessions_refresh');
@@ -209,33 +219,107 @@ class active_sessions extends rcube_plugin
     /**
      * Helper to get sessions
      */
-    private function get_sessions()
+    function get_sessions()
     {
         $db = $this->rc->get_dbh();
         $query = "SELECT sess_id, ip, changed, vars, user_agent
-                  FROM session
-                  WHERE user_agent IS NOT NULL AND user_agent != ''";
+                FROM session
+                WHERE user_agent IS NOT NULL AND user_agent != ''";
         $sessions = $db->query($query)->fetchAll(PDO::FETCH_ASSOC);
-    
+
         foreach ($sessions as &$session) {
-            // Parse the session variables from base64/unserialize
             $vars = $this->parse_session_vars($session['vars']);
-    
-            // Store additional data in our array before returning
-            $session['language']  = $vars['language'] ?? 'Unknown';
-            $session['task']      = $vars['task'] ?? 'Unknown';
-            $session['theme']     = $vars['skin_config']['jquery_ui_colors_theme'] ?? 'Default';
+            $session['language'] = $vars['language'] ?? 'Unknown';
+            $session['task'] = $vars['task'] ?? 'Unknown';
+            $session['theme'] = $vars['skin_config']['jquery_ui_colors_theme'] ?? 'Default';
             $session['dark_mode'] = !empty($vars['skin_config']['dark_mode_support']) ? 'Enabled' : 'Disabled';
-            $session['location']  = $this->get_geolocation($session['ip']);
-    
-            // user_agent is already in $session['user_agent'], courtesy of our SELECT query
-            // If the DB field might be NULL, you can ensure it's at least an empty string:
-            $session['user_agent'] = $session['user_agent'] ?? '';
+            $session['location'] = $this->get_geolocation($session['ip']);
         }
-    
+
+        // Merge Roundcube sessions with Dovecot sessions
+        $dovecot_sessions = $this->get_dovecot_sessions();
+        // print_r($username = $this->rc->user->get_username());
+        return array_merge($sessions, $dovecot_sessions);
+    }
+
+    private function get_dovecot_sessions()
+    {
+        // Get the logged-in user's username
+        $username = $this->rc->user->get_username();
+        if (!$username) {
+            error_log("No logged-in username found");
+            return [];
+        }
+
+        $output = [];
+        exec('sudo doveadm who 2>&1', $output, $status); // Capture stderr too
+
+        error_log("Doveadm who command status: $status");
+        error_log("Doveadm who command output: " . print_r($output, true));
+
+        if ($status !== 0) {
+            error_log("Dovecot who command failed with status: $status");
+            return [];
+        }
+
+        $sessions = [];
+        foreach ($output as $line) {
+            // Match session lines and filter by username
+            if (preg_match('/^(\S+)\s+\d+\s+imap\s+\(([^)]+)\)\s+\(([^)]+)\)$/', $line, $matches)) {
+                if ($matches[1] === $username) { // Check if the username matches
+                    $pids = explode(' ', $matches[2]); // Split PIDs
+                    $ips = explode(' ', $matches[3]);  // Split IPs
+
+                    // Create a session entry for each IP
+                    foreach ($ips as $index => $ip) {
+                        $sessions[] = [
+                            'username' => $matches[1],
+                            'ip' => $ip,
+                            'location' => $this->get_geolocation($ip),
+                            'task' => 'imap',
+                            'changed' => 'N/A', // Replace with timestamp if available
+                            'user_agent' => 'Client App', // Placeholder
+                            'pid' => $pids[$index] ?? 'Unknown', // Match PID to IP if possible
+                        ];
+                    }
+                }
+            } else {
+                error_log("Failed to parse line: $line");
+            }
+        }
+
+        error_log("Parsed Dovecot sessions for user {$username}: " . print_r($sessions, true));
         return $sessions;
     }
-    
+
+    function terminate_dovecot_session()
+    {
+        $ip = rcube_utils::get_input_value('ip', rcube_utils::INPUT_POST);
+        $username = rcube_utils::get_input_value('username', rcube_utils::INPUT_POST);
+
+        if ($ip && $username) {
+            // Sanitize inputs manually to prevent injection
+            $sanitized_username = $username;
+            $sanitized_ip = $ip;
+
+            if ($sanitized_username && $sanitized_ip) {
+                // Construct the command
+                $command = "sudo doveadm kick {$sanitized_username} {$sanitized_ip}";
+                exec($command . " 2>&1", $output, $status);
+
+                if ($status === 0) {
+                    error_log("Dovecot session terminated for user: {$sanitized_username}, IP: {$sanitized_ip}");
+                    $this->rc->output->command('plugin.active_sessions_refresh');
+                } else {
+                    error_log("Failed to terminate Dovecot session for user: {$sanitized_username}, IP: {$sanitized_ip}. Output: " . implode("\n", $output));
+                }
+            } else {
+                error_log("Sanitized inputs are empty or invalid.");
+            }
+        } else {
+            error_log("Missing IP or username for terminate_dovecot_session");
+        }
+    }
 
     /**
      * Parse session vars (base64 & unserialize)

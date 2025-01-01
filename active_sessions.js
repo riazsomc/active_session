@@ -8,10 +8,10 @@ document.addEventListener('DOMContentLoaded', function () {
         console.warn('Active Sessions HTML not found.');
         return;
     }
-
+    console.log("Active sessions data:", window.active_sessions);
     // 3) Check if we have any sessions passed from PHP
     if (!window.active_sessions || window.active_sessions.length === 0) {
-        tableBody.innerHTML = '<tr><td colspan="10">No active sessions available.</td></tr>';
+        tableBody.innerHTML = '<tr><td colspan="6">No active sessions available.</td></tr>';
         return;
     }
 
@@ -21,53 +21,44 @@ document.addEventListener('DOMContentLoaded', function () {
     // 5) Clear existing rows (if any), then populate
     tableBody.innerHTML = '';
     window.active_sessions.forEach((session) => {
-        // session.user_agent is the database column value
-
-        // -- Parse the user_agent string with UA Parser --
-        parser.setUA(session.user_agent || '');
-        const result = parser.getResult();
-
-        // Build strings for Browser and OS, falling back to "Unknown"
-        const browser = result.browser.name
-            ? (result.browser.version
-                ? `${result.browser.name} ${result.browser.version}`
-                : result.browser.name
-              )
-            : 'Unknown';
-
-        const os = result.os.name
-            ? (result.os.version
-                ? `${result.os.name} ${result.os.version}`
-                : result.os.name
-              )
-            : 'Unknown';
-
-        // 6) Build a table row with all the fields
+        const isDovecot = session.task === 'imap';
+    
         const row = document.createElement('tr');
         row.innerHTML = `
+            
             <td>${session.ip}</td>
             <td>${session.location}</td>
-            <td>${session.language}</td>
             <td>${session.task}</td>
-            <td>${session.theme}</td>
-            <td>${session.dark_mode}</td>
             <td>${session.changed}</td>
-            <td>${browser}</td>    <!-- From user_agent parsing -->
-            <td>${os}</td>         <!-- From user_agent parsing -->
+            <td>${session.user_agent || 'N/A'}</td>
             <td>
-                <button class="terminate-session button" data-sess-id="${session.sess_id}">
-                    Logout
-                </button>
+                ${isDovecot ? `
+                    <button class="terminate-dovecot-session button" data-username="${session.username}" data-ip="${session.ip}">
+                        Logout
+                    </button>
+                ` : `
+                    <button class="terminate-session button" data-sess-id="${session.sess_id}">
+                        Logout
+                    </button>
+                `}
             </td>
         `;
         tableBody.appendChild(row);
+    });
+    
+    // Attach event handlers for Dovecot session logout
+    tableBody.querySelectorAll('.terminate-dovecot-session').forEach((btn) => {
+        btn.addEventListener('click', function () {
+            const username = this.dataset.username;
+            const ip = this.dataset.ip;
+            rcmail.http_post('plugin.terminate_dovecot_session', { username, ip });
+        });
     });
 
     // 7) Attach event handlers for single-session logout
     tableBody.querySelectorAll('.terminate-session').forEach((btn) => {
         btn.addEventListener('click', function () {
             const sessId = this.dataset.sessId;
-            // Roundcube’s JS function to call your plugin action
             rcmail.http_post('plugin.terminate_session', { sess_id: sessId });
         });
     });
@@ -76,21 +67,30 @@ document.addEventListener('DOMContentLoaded', function () {
     terminateAllBtn.addEventListener('click', function () {
         rcmail.http_post('plugin.terminate_all_sessions', {});
     });
+
+    // 9) Attach event handlers for Dovecot session logout
+    tableBody.querySelectorAll('.terminate-dovecot-session').forEach((btn) => {
+        btn.addEventListener('click', function () {
+            const username = this.dataset.username;
+            const ip = this.dataset.ip;
+            rcmail.http_post('plugin.terminate_dovecot_session', { username, ip });
+        });
+    });
 });
 
-// 9) Listen for server-side command to refresh
+// 10) Listen for server-side command to refresh
 if (window.rcmail) {
     rcmail.addEventListener('plugin.active_sessions_refresh', function () {
         window.location.reload();
     });
 
-    // 10) Post the full client-side user agent (once) in case iOS Safari's server UA is truncated
+    // 11) Post the full client-side user agent (once) in case iOS Safari's server UA is truncated
     rcmail.addEventListener('init', function () {
         const fullUA = navigator.userAgent || '';
         // Only send once per browser, storing a flag in localStorage
         if (!localStorage.getItem('ua_submitted')) {
-            rcmail.http_post('', { client_ua: fullUA }); 
+            rcmail.http_post('', { client_ua: fullUA });
             localStorage.setItem('ua_submitted', '1');
         }
     });
-}
+};
